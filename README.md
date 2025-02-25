@@ -252,6 +252,16 @@ Each request is either simply the keepalive payload (`"keepalive"`, yes that's v
 
 Please see the implementation for specifics, as I am really running out of time (yet to write the entire client).
 
+### Packaging into a standalone binary using pyinstaller
+
+```sh
+# first set up virtual environment if need be
+pip install pyinstaller
+cd server
+pyinstaller --onefile server.py
+chmod +x dist/server
+dist/server --help
+```
 
 # Making The Client
 
