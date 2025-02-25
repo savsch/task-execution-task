@@ -6,7 +6,7 @@ import os
 
 import uuid
 
-from utils import get_timestamp
+from utils import current_timestamp
 
 
 class DatabaseManager:
@@ -57,7 +57,7 @@ class DatabaseManager:
         with self._get_conn() as conn:
             conn.execute(
                 "UPDATE tasks SET start_timestamp = ? WHERE taskid = ?",
-                (get_timestamp(), task_id)
+                (current_timestamp(), task_id)
             )
             conn.commit()
 
@@ -65,7 +65,7 @@ class DatabaseManager:
         with self._get_conn() as conn:
             conn.execute(
                 "UPDATE tasks SET end_timestamp = ? WHERE taskid = ?",
-                (get_timestamp(), task_id)
+                (current_timestamp(), task_id)
             )
             conn.commit()
 

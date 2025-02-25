@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict
 import os
 
+import globalconfig
 from running_tasks import RunningTasks
 from db_manager import DatabaseManager
 from priority_queue import CancellablePriorityQueue
@@ -52,6 +53,10 @@ class TaskServer:
             self.workers.append(worker)
             worker.start()
 
+    def unsubscribe_writer(self, task_id: str):
+        with self.subscribers_lock:
+            self.task_subscribers.pop(task_id, None)
+
     def handle_task_status(self, task_id: str, **kwargs):
         # TODO Determine whether it'd be more performant to create the status json only after it has been confirmed there's a subscriber for the taskid
         with self.subscribers_lock:
@@ -60,7 +65,10 @@ class TaskServer:
                 status = kwargs.get("status")
                 if status is not None:
                     asyncio.run_coroutine_threadsafe(
-                        self.send_json(writer, status),
+                        self.send_json(writer,
+                                       status,
+                                       upon_connection_reset=lambda: self.unsubscribe_writer(task_id)
+                                       ),
                         self.loop
                     )
                 elif kwargs.get("exit_code") is not None and kwargs.get("report_path") is not None:
@@ -70,17 +78,22 @@ class TaskServer:
                         self.send_json(writer, {
                             "binary_data": os.path.getsize(report_path),
                             "exit_code": kwargs["exit_code"]
-                        }), self.loop
+                        }, upon_connection_reset=lambda: self.unsubscribe_writer(task_id)), self.loop
                     )
                     asyncio.run_coroutine_threadsafe(
                         self.send_report(writer, task_id, report_path), self.loop
                     )
 
-    async def send_json(self, writer: asyncio.StreamWriter, data) -> None:
+    async def send_json(self, writer: asyncio.StreamWriter, data, upon_connection_reset = lambda: None) -> None:
         try:
             message = json.dumps(data) + "\n"
             writer.write(message.encode())
             await writer.drain()
+        except ConnectionResetError:
+            print(f"Connection {writer} reset by peer")
+            upon_connection_reset()
+            writer.close()
+            await writer.wait_closed()
         except Exception as e:
             print("Exception in send_json", e)
             traceback.print_exc()
@@ -262,14 +275,17 @@ class TaskServer:
 
 def main():
     parser = argparse.ArgumentParser(description='TaskExec Server')
-    parser.add_argument('--host', default='127.0.0.1', help='Server host')
+    parser.add_argument('--host', default='0.0.0.0', help='Server host')
     parser.add_argument('--port', type=int, default=8888, help='Server port')
     parser.add_argument('--maxthreadcount', type=int, default=5, help='Maximum number of threads')
     parser.add_argument('--timeout', type=float, default=60*15, help='Task timeout in seconds')
     parser.add_argument('--datadir', default='taskexec_server_data',
                        help='Directory for all server data (database and reports)')
+    parser.add_argument("--wordlist", default="/usr/share/dirb/wordlists/common.txt", help="Path to the wordlist to use for gobuster/ffuf task types.")
 
     args = parser.parse_args()
+
+    globalconfig.WORDLIST_PATH = args.wordlist
 
     server = TaskServer(
         args.host,
@@ -280,6 +296,7 @@ def main():
     )
 
     try:
+        print(f"Starting server on {args.host}:{args.port}")
         asyncio.run(server.run())
     except KeyboardInterrupt:
         print("\nShutting down...")

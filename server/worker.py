@@ -8,10 +8,10 @@ import time
 from running_tasks import RunningTasks
 from task_executors.utils.taskutils import get_task_executor_from_params
 from task_interfaces import TaskOutput
-from task_executors.echo_executor import EchoTaskExecutor
+from task_executors.echo_executor import EchoExecutor
 from db_manager import DatabaseManager
 from priority_queue import CancellablePriorityQueue, PrioritizedTask
-from utils import get_timestamp, bytes_to_string
+from utils import current_timestamp, bytes_to_string
 
 
 class WorkerThread(threading.Thread):
@@ -67,15 +67,15 @@ class WorkerThread(threading.Thread):
                         f.write(data)
                     self.status_callback(
                         self.task_id,
-                        status = {"time":get_timestamp(), "stdout": bytes_to_string(data)}
+                        status = {"time":current_timestamp(), "stdout": bytes_to_string(data)}
                     )
 
                 def emit_error_output(self, data: bytes):
                     with open(self.output_file, "a") as f:
-                        f.write(f"[STDERR: {data}]")
+                        f.write(f"[STDERR: {bytes_to_string(data)}]")
                     self.status_callback(
                         self.task_id,
-                        status = {"time":get_timestamp(), "stderr": bytes_to_string(data)}
+                        status = {"time":current_timestamp(), "stderr": bytes_to_string(data)}
                     )
 
                 # def set_exit_code(self, code: int):

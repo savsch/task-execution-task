@@ -1,0 +1,1 @@
+WORDLIST_PATH = None

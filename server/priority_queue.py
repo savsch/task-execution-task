@@ -3,7 +3,7 @@ import threading
 from typing import Optional
 from dataclasses import dataclass
 
-from utils import get_timestamp
+from utils import current_timestamp
 
 
 @dataclass(order=True)
@@ -25,7 +25,7 @@ class CancellablePriorityQueue:
             if task_id not in self._cancelled and task_id not in self._task_set:
                 heapq.heappush(
                     self._queue,
-                    PrioritizedTask(-priority, get_timestamp(), task_id, params)
+                    PrioritizedTask(-priority, current_timestamp(), task_id, params)
                 )
                 self._task_set.add(task_id)
 

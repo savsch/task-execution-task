@@ -1,3 +1,4 @@
+import re
 import select
 import subprocess
 from typing import Dict, Optional
@@ -5,19 +6,32 @@ from typing import Dict, Optional
 from task_executor import TaskExecutor
 from task_executors.utils.exceptions import TaskValidationException
 
-class EchoExecutor(TaskExecutor):
+class NmapExecutor(TaskExecutor):
     @classmethod
     def validate(cls, request_args: Dict) -> None:
+        # TODO Maybe consider using an existing nmap wrapper for more robust validation,
+        #     as this might be prone to security bugs
+        #     Maybe check out https://github.com/nmmapper/python3-nmap/blob/main/nmap3/nmapparser.py for this
         if not (isinstance(request_args, list) and request_args and all(
-                (isinstance(item, str) and item.isalnum()) for item in request_args)):
+                (isinstance(item, str)) for item in request_args)):
             raise TaskValidationException(
-                "args must be a list of strings, each containing only alphanumeric characters")
+                "args must be a list of strings")
+        user_input = ''.join(request_args)
+        if not re.match(r'^[a-zA-Z0-9\-\/\.:,_+=@]*$', user_input):
+            raise TaskValidationException("Illegal characters in nmap args.")
 
+    # TODO reduce code duplication here
     def execute(self, timeout: Optional[float] = None) -> int:
+
+        # I explicitly add a --stats-every to the request_args, to make enable progress updates, when the flag isn't
+        #     already requested for
+        if '--stats-every' not in ''.join(self.request_args):
+            self.request_args.append('--stats-every=2s')
+
         streams = {}
         try:
             self._process = subprocess.Popen(
-                ['echo', *self.request_args],
+                ['nmap', *self.request_args],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=0
@@ -63,6 +77,7 @@ class EchoExecutor(TaskExecutor):
                 for stream, _ in streams.values():
                     stream.close()
 
+    # TODO reduce code duplication here
     def stop(self) -> None:
         if self._process:
             self._process.terminate()
