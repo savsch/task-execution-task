@@ -18,6 +18,14 @@ Title basically. If implemented this could help leverage certain existing featur
 
 Colorful, and with verbosity settings. A key feature I missed.
 
+### The Client
+
+As I'd later learn (apologies).
+
+### Better http fetch type task
+
+Using selenium (and maybe even selenium-stealth) for better responses.
+
 ## \[SECURITY ISSUE\] Regarding running tasks as processes on the server host
 
 This is inherently unsafe, regardless of whatever amount of sanitization is done on the input.
@@ -266,3 +274,16 @@ dist/server --help
 # Making The Client
 
 Haven't given it much thought yet, and not much time is left, so I'll make something hopefully stateless, simple and cli based. (GUI in the future 😭).
+
+**UPDATE:** No client before the deadline, sorry. It took quite some time documenting the server itself.
+Making a client, however, should be fairly straightforward. That's because I have put a lot of thought designing the server.
+The interaction is so simple that a lot of stuff (other than automatically saving the retrieved result on the client side) can be done through netcat itself.
+Please check out the [demo videos directory](demo_videos/server).
+
+# Interacting with the server (and verifying some of its functionality) with just netcat
+
+![1.mp4](demo_videos/server/taskexec_server_1.mp4)
+
+![2.mp4](demo_videos/server/taskexec_server_2.mp4)
+
+![3.mp4](demo_videos/server/taskexec_server_3.mp4)
