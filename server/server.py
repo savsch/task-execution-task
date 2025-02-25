@@ -8,9 +8,10 @@ from typing import Dict
 import os
 
 from running_tasks import RunningTasks
-from task_interfaces import TaskType
 from db_manager import DatabaseManager
 from priority_queue import CancellablePriorityQueue
+from task_executors.utils.taskutils import validate_params
+from task_executors.utils.exceptions import TaskValidationException
 from worker import WorkerThread
 
 class TaskServer:
@@ -94,6 +95,14 @@ class TaskServer:
                     break
 
                 request = json.loads(data.decode())
+
+                if request == "keepalive":
+                    continue
+
+                if not isinstance(request, dict):
+                    await self.send_json(writer, {"error": "Unexpected input format"})
+                    continue
+
                 if request.get("version", 0) != 0: # TODO Implement more abstract version handling to actually materialize this
                     await self.send_json(writer, {"error": "Unsupported protocol version"})
                     break
@@ -118,9 +127,9 @@ class TaskServer:
             except json.JSONDecodeError:
                 await self.send_json(writer, {"error": "Invalid JSON"})
             except Exception as e:
-                print("Exception when handling request:", e) # TODO add comprehensive error logging
+                print("Exception when handling request:", e) # TODO add comprehensive error logging (like a fatal field to indicate connection closure)
                 traceback.print_exc()
-                await self.send_json(writer, {"error": "Unexpected error or malformed request, exiting."})
+                await self.send_json(writer, {"error": "Unexpected error, exiting."})
                 break
 
         writer.close()
@@ -134,10 +143,9 @@ class TaskServer:
             return
 
         try:
-            TaskType(params.get("type"))
-            # TODO add more validation
-        except ValueError:
-            await self.send_json(writer, {"error": "Invalid task type"})
+            validate_params(params)
+        except TaskValidationException as e:
+            await self.send_json(writer, {"error": str(e)})
             return
 
         priority = request.get("priority", 0)

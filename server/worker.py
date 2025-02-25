@@ -6,11 +6,12 @@ from pathlib import Path
 import time
 
 from running_tasks import RunningTasks
-from task_interfaces import TaskOutput, TaskType, TaskParams
-from task_executor import TaskExecutor, EchoTaskExecutor
+from task_executors.utils.taskutils import get_task_executor_from_params
+from task_interfaces import TaskOutput
+from task_executors.echo_executor import EchoTaskExecutor
 from db_manager import DatabaseManager
-from priority_queue import CancellablePriorityQueue
-from utils import get_timestamp
+from priority_queue import CancellablePriorityQueue, PrioritizedTask
+from utils import get_timestamp, bytes_to_string
 
 
 class WorkerThread(threading.Thread):
@@ -37,22 +38,22 @@ class WorkerThread(threading.Thread):
 
     def run(self):
         while not self._stop_event.is_set():
-            task_id = self.queue.get()
-            if task_id is None:
+            task = self.queue.get()
+            if task is None:
                 time.sleep(0.1)
                 continue
 
-            self.execute_task(task_id)
+            self.execute_task(task)
 
-    def execute_task(self, task_id: str):
-        self.running_tasks.add(task_id)
+    def execute_task(self, task: PrioritizedTask):
+        self.running_tasks.add(task.task_id)
         try:
-            report_path = Path(self.reports_dir) / str(task_id)
+            report_path = Path(self.reports_dir) / str(task.task_id)
             report_path.mkdir(parents=True, exist_ok=True)
             output_file = report_path / "output.txt"
 
             # Set the report path in database before starting execution
-            self.db.set_report_path(task_id, str(output_file.resolve()))
+            self.db.set_report_path(task.task_id, str(output_file.resolve()))
 
             class TaskOutputHandler(TaskOutput):
                 def __init__(self, status_callback, task_id: str, output_file: Path):
@@ -61,20 +62,20 @@ class WorkerThread(threading.Thread):
                     self.output_file = output_file
                     self.exit_code: Optional[int] = None
 
-                def emit_normal_output(self, data: str):
-                    with open(self.output_file, "a") as f:
-                        f.write(f"{data}")
+                def emit_normal_output(self, data: bytes):
+                    with open(self.output_file, "ab") as f:
+                        f.write(data)
                     self.status_callback(
                         self.task_id,
-                        status = {"time":get_timestamp(), "stdout": data}
+                        status = {"time":get_timestamp(), "stdout": bytes_to_string(data)}
                     )
 
-                def emit_error_output(self, data: str):
+                def emit_error_output(self, data: bytes):
                     with open(self.output_file, "a") as f:
                         f.write(f"[STDERR: {data}]")
                     self.status_callback(
                         self.task_id,
-                        status = {"time":get_timestamp(), "stderr": data}
+                        status = {"time":get_timestamp(), "stderr": bytes_to_string(data)}
                     )
 
                 # def set_exit_code(self, code: int):
@@ -82,17 +83,17 @@ class WorkerThread(threading.Thread):
                 #     with open(self.output_file, "a") as f:
                 #         f.write(f"\nPROCESS EXITED WITH EXIT CODE: {code}\n")
 
-            output_handler = TaskOutputHandler(self.status_callback, task_id, output_file)
+            output_handler = TaskOutputHandler(self.status_callback, task.task_id, output_file)
 
-            params = TaskParams(type=TaskType.ECHO, args=["te\nst"])
-            executor = EchoTaskExecutor(task_id, params, output_handler)
+            executor_class = get_task_executor_from_params(task.params)
+            executor = executor_class(task.task_id, task.params.get("args"), output_handler)
 
-            self.db.update_task_start(task_id)
+            self.db.update_task_start(task.task_id)
             exit_code = executor.execute(timeout=self.timeout)
-            self.db.update_task_end(task_id)
+            self.db.update_task_end(task.task_id)
 
             self.status_callback(
-                task_id, exit_code=exit_code, report_path=str(output_file.resolve())
+                task.task_id, exit_code=exit_code, report_path=str(output_file.resolve())
             )
         finally:
-            self.running_tasks.remove(task_id)
+            self.running_tasks.remove(task.task_id)

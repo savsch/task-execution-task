@@ -29,13 +29,13 @@ class CancellablePriorityQueue:
                 )
                 self._task_set.add(task_id)
 
-    def get(self) -> Optional[int]:
+    def get(self) -> Optional[PrioritizedTask]:
         with self._lock:
             while self._queue:
                 task = heapq.heappop(self._queue)
                 if task.task_id not in self._cancelled:
                     self._task_set.remove(task.task_id)
-                    return task.task_id
+                    return task
             return None
 
     def cancel(self, task_id: str) -> bool:
