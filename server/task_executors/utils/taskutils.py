@@ -3,6 +3,7 @@ from task_executors.echo_executor import EchoExecutor
 from task_executor import TaskExecutor
 from task_executors.ffuf_executor import FfufExecutor
 from task_executors.gobuster_executor import GobusterExecutor
+from task_executors.http_executor import HttpExecutor
 from task_executors.nmap_executor import NmapExecutor
 from task_executors.utils.exceptions import TaskValidationException
 
@@ -10,7 +11,8 @@ EXECUTOR_REGISTRY = {
     'echo': EchoExecutor,
     'nmap': NmapExecutor,
     'gobuster': GobusterExecutor,
-    'ffuf': FfufExecutor
+    'ffuf': FfufExecutor,
+    'http': HttpExecutor
 }
 
 def validate_params(params: Dict) -> None:

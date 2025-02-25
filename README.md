@@ -153,6 +153,9 @@ I am running out of time, so I can't write a full-blown spec right now ~~(withou
     # Note: -w parameter automatically added with server's configured wordlist
 }
 
+# 5. HTTP fetch task
+# TODO add documentation
+
 # URL Validation Rules (for Gobuster/Ffuf):
 # - Must start with http:// or https://
 # - No fragments (#) allowed
