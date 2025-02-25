@@ -2,7 +2,6 @@ import sqlite3
 from contextlib import contextmanager
 import threading
 from typing import Optional
-import time
 import os
 
 import uuid
@@ -18,13 +17,12 @@ class DatabaseManager:
 
     def _init_db(self):
         with self._get_conn() as conn:
-            # Set WAL journal mode for better concurrency
+            # https://www.sqlite.org/pragma.html#pragma_journal_mode, to support multithreaded accesses
             conn.execute("PRAGMA journal_mode=WAL")
             
-            # Set synchronous mode for better performance while maintaining durability
+            # https://www.sqlite.org/pragma.html#pragma_synchronous
             conn.execute("PRAGMA synchronous=NORMAL")
-            
-            # Create the tasks table if it doesn't exist
+
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     taskid TEXT PRIMARY KEY,
@@ -53,7 +51,6 @@ class DatabaseManager:
                 conn.commit()
                 return task_id
             except sqlite3.IntegrityError:
-                # In the extremely unlikely event of a UUID collision, try again
                 return self.create_task()
 
     def update_task_start(self, task_id: str):
@@ -82,7 +79,7 @@ class DatabaseManager:
             conn.commit()
 
     def clear_report_path(self, task_id: str):
-        """Clear the report path after consumption"""
+        """Sets the report_path to null"""
         with self._get_conn() as conn:
             conn.execute(
                 "UPDATE tasks SET report_path = NULL WHERE taskid = ?",

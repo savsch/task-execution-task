@@ -42,7 +42,7 @@ class EchoTaskExecutor(TaskExecutor):
                 self.output_handler.emit_error_output(stderr)
 
             exit_code = self._process.returncode
-            self.output_handler.set_exit_code(exit_code)
+            # self.output_handler.set_exit_code(exit_code)
             return exit_code
 
         except subprocess.TimeoutExpired:

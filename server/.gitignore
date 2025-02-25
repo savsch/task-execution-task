@@ -1,0 +1,3 @@
+.venv/
+taskexec_server_data/
+__pycache__/

@@ -1,31 +1,31 @@
 import heapq
 import threading
-from typing import Optional, Tuple
+from typing import Optional
 from dataclasses import dataclass
-import time
 
 from utils import get_timestamp
 
 
 @dataclass(order=True)
 class PrioritizedTask:
-    priority: int
-    timestamp: int
-    task_id: str = None  # Will be compared by priority and timestamp only
+    minus_priority: int    # The higher the priority (lower the minus_priority), the earlier it's executed
+    timestamp: int         # The lower the timestamp, the earlier it's executed
+    task_id: str
+    params: dict           # This needs to come after only task_id as we never intend to compare via params only to end up in a TypeError
 
 class CancellablePriorityQueue:
     def __init__(self):
         self._queue = []
         self._lock = threading.Lock()
         self._cancelled = set()
-        self._task_set = set()  # Track active tasks for fast lookup
+        self._task_set = set()
 
-    def put(self, task_id: str, priority: int) -> None:
+    def put(self, task_id: str, priority: int, params: dict) -> None:
         with self._lock:
             if task_id not in self._cancelled and task_id not in self._task_set:
                 heapq.heappush(
                     self._queue,
-                    PrioritizedTask(priority, get_timestamp(), task_id)
+                    PrioritizedTask(-priority, get_timestamp(), task_id, params)
                 )
                 self._task_set.add(task_id)
 
@@ -34,7 +34,7 @@ class CancellablePriorityQueue:
             while self._queue:
                 task = heapq.heappop(self._queue)
                 if task.task_id not in self._cancelled:
-                    self._task_set.remove(task.task_id)  # Remove from task set when returned
+                    self._task_set.remove(task.task_id)
                     return task.task_id
             return None
 

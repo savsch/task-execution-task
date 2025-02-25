@@ -19,29 +19,28 @@ class TaskServer:
         self.port = port
         self.max_threads = max_threads
         self.task_timeout = task_timeout
-        
-        # This will later store a reference to the Stellar event loop
+
+        # This will later store a reference to the event loop (Stellar)
         self.loop = None
-        
+
         # Setup data directory structure
         self.data_dir = Path(data_dir)
         self.reports_dir = self.data_dir / "reports"
         self.db_path = self.data_dir / "tasks.db"
 
-        # Create directory structure
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.reports_dir.mkdir(exist_ok=True)
 
         self.db = DatabaseManager(str(self.db_path))
         self.queue = CancellablePriorityQueue()
-        
-        # Track subscribed clients
+
+        # task_subscribers stores the task_id to listening connection mapping. subscribers_lock is the corresponding lock
         self.task_subscribers: Dict[str, asyncio.StreamWriter] = {}
         self.subscribers_lock = threading.Lock()
 
         # Initialize worker threads
         self.workers = []
-        for _ in range(max_threads - 1):  # -1 for Stellar
+        for _ in range(max_threads - 1):  # 1 of the threads is used by the event loop (Stellar) itself
             worker = WorkerThread(
                 self.queue,
                 self.db,
@@ -52,22 +51,38 @@ class TaskServer:
             self.workers.append(worker)
             worker.start()
 
-    def handle_task_status(self, task_id: str, status):
+    def handle_task_status(self, task_id: str, **kwargs):
         # TODO Determine whether it'd be more performant to create the status json only after it has been confirmed there's a subscriber for the taskid
         with self.subscribers_lock:
             writer = self.task_subscribers.get(task_id)
             if writer and self.loop:
-                asyncio.run_coroutine_threadsafe(
-                    self.send_json(writer, status),
-                    self.loop  # Use the stored Stellar loop reference
-                )
+                status = kwargs.get("status")
+                if status is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        self.send_json(writer, status),
+                        self.loop
+                    )
+                elif kwargs.get("exit_code") is not None and kwargs.get("report_path") is not None:
+                    # Attempt to consume the report
+                    report_path = kwargs["report_path"]
+                    asyncio.run_coroutine_threadsafe(
+                        self.send_json(writer, {
+                            "binary_data": os.path.getsize(report_path),
+                            "exit_code": kwargs["exit_code"]
+                        }), self.loop
+                    )
+                    asyncio.run_coroutine_threadsafe(
+                        self.send_report(writer, task_id, report_path), self.loop
+                    )
 
     async def send_json(self, writer: asyncio.StreamWriter, data) -> None:
         try:
             message = json.dumps(data) + "\n"
             writer.write(message.encode())
             await writer.drain()
-        except Exception:
+        except Exception as e:
+            print("Exception in send_json", e)
+            traceback.print_exc()
             writer.close()
             await writer.wait_closed()
 
@@ -113,9 +128,9 @@ class TaskServer:
 
     async def handle_task_request(self, writer: asyncio.StreamWriter,
                                   request: dict, watch: bool):
-        params = request.get("params", {})
+        params = request.get("params")
         if not isinstance(params, dict):
-            await self.send_json(writer, {"error": "Invalid params"})
+            await self.send_json(writer, {"error": "Invalid or missing params"})
             return
 
         try:
@@ -127,8 +142,9 @@ class TaskServer:
 
         priority = request.get("priority", 0)
 
+        # TODO remove the burden of database writes from Stellar event loop (this one is simple)
         task_id = self.db.create_task()
-        self.queue.put(task_id, priority)
+        self.queue.put(task_id, priority, params)
 
         response = {"taskid": task_id}
         await self.send_json(writer, response)
@@ -149,8 +165,9 @@ class TaskServer:
 
         running_tasks = RunningTasks()
 
-        if not (running_tasks.is_running(task_id) or
-                self.queue.is_task_enqueued(task_id)):
+        is_running = running_tasks.is_running(task_id)
+        is_enqueued = self.queue.is_task_enqueued(task_id)
+        if not (is_running or is_enqueued):
             await self.send_json(writer,
                                  {"error": "Unable to subscribe to real-time updates: "
                                            "The task has either finished or the task id is invalid"})
@@ -160,7 +177,7 @@ class TaskServer:
             if task_id in self.task_subscribers:
                 await self.send_json(writer, {"error": "Task already being watched"})
                 return
-            await self.send_json(writer, "success")
+            await self.send_json(writer, {"result": "success", "has_execution_started": is_running})
             self.task_subscribers[task_id] = writer
 
     async def handle_report_request(self, writer: asyncio.StreamWriter,
@@ -171,35 +188,38 @@ class TaskServer:
             return
 
         start_time, end_time, report_path = self.db.get_task_status(task_id)
-        
+
         if not end_time:
             await self.send_json(writer, {"error": "Task is still being processed"})
             return
-            
+
         if not report_path:
             await self.send_json(writer, {"error": "Report not available or already consumed"})
             return
 
+
         try:
-            with open(report_path, "rb") as f:
-                content = f.read()
+            content_length = os.path.getsize(report_path)
         except FileNotFoundError:
             await self.send_json(writer, {"error": "Report file not found"})
             return
 
-        await self.send_json(writer, "success")
-        
-        # Send content length and content
-        writer.write(f"{len(content)}\n".encode())
-        writer.write(content)
-        await writer.drain()
+        await self.send_json(writer, {"binary_data": content_length})
+        await self.send_report(writer, task_id, report_path)
 
-        # Clear the report path and delete the file
+    async def send_report(self, writer: asyncio.StreamWriter, task_id, report_path, chunk_size=2048):
+        with open(report_path, 'rb') as f:
+            while chunk := f.read(chunk_size):
+                writer.write(chunk)
+                await writer.drain()
+
+        # Clear the report path from db and delete the file from filesystem
         self.db.clear_report_path(task_id)
         try:
             os.remove(report_path)
+            os.rmdir(os.path.dirname(report_path))
         except FileNotFoundError:
-            pass  # File might have been deleted by another process
+            pass
 
     async def handle_cancel_request(self, writer: asyncio.StreamWriter,
                                     request: dict):
@@ -209,7 +229,7 @@ class TaskServer:
             return
 
         start_time, end_time, _ = self.db.get_task_status(task_id)
-        
+
         if start_time:
             await self.send_json(writer, {"error": "Already started"})
         elif end_time:
@@ -237,8 +257,8 @@ def main():
     parser.add_argument('--host', default='127.0.0.1', help='Server host')
     parser.add_argument('--port', type=int, default=8888, help='Server port')
     parser.add_argument('--maxthreadcount', type=int, default=5, help='Maximum number of threads')
-    parser.add_argument('--timeout', type=float, default=900, help='Task timeout in seconds')
-    parser.add_argument('--datadir', default='taskexec_server_data', 
+    parser.add_argument('--timeout', type=float, default=60*15, help='Task timeout in seconds')
+    parser.add_argument('--datadir', default='taskexec_server_data',
                        help='Directory for all server data (database and reports)')
 
     args = parser.parse_args()

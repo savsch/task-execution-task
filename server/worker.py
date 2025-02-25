@@ -6,7 +6,7 @@ from pathlib import Path
 import time
 
 from running_tasks import RunningTasks
-from task_interfaces import TaskOutput, TaskType, TaskParams, StatusUpdate
+from task_interfaces import TaskOutput, TaskType, TaskParams
 from task_executor import TaskExecutor, EchoTaskExecutor
 from db_manager import DatabaseManager
 from priority_queue import CancellablePriorityQueue
@@ -18,7 +18,7 @@ class WorkerThread(threading.Thread):
         self,
         queue: CancellablePriorityQueue,
         db: DatabaseManager,
-        reports_dir: str,
+        reports_dir,
         timeout: float,
         status_callback
     ):
@@ -63,28 +63,28 @@ class WorkerThread(threading.Thread):
 
                 def emit_normal_output(self, data: str):
                     with open(self.output_file, "a") as f:
-                        f.write(f"{data}\n")
+                        f.write(f"{data}")
                     self.status_callback(
                         self.task_id,
-                        StatusUpdate(timestamp=get_timestamp(), stdout=data)
+                        status = {"time":get_timestamp(), "stdout": data}
                     )
 
                 def emit_error_output(self, data: str):
                     with open(self.output_file, "a") as f:
-                        f.write(f"STDERR: {data}\n")
+                        f.write(f"[STDERR: {data}]")
                     self.status_callback(
                         self.task_id,
-                        StatusUpdate(timestamp=get_timestamp(), stderr=data)
+                        status = {"time":get_timestamp(), "stderr": data}
                     )
 
-                def set_exit_code(self, code: int):
-                    self.exit_code = code
-                    with open(self.output_file, "a") as f:
-                        f.write(f"\nPROCESS EXITED WITH EXIT CODE: {code}\n")
+                # def set_exit_code(self, code: int):
+                #     self.exit_code = code
+                #     with open(self.output_file, "a") as f:
+                #         f.write(f"\nPROCESS EXITED WITH EXIT CODE: {code}\n")
 
             output_handler = TaskOutputHandler(self.status_callback, task_id, output_file)
 
-            params = TaskParams(type=TaskType.ECHO, args=["test"])
+            params = TaskParams(type=TaskType.ECHO, args=["te\nst"])
             executor = EchoTaskExecutor(task_id, params, output_handler)
 
             self.db.update_task_start(task_id)
@@ -92,8 +92,7 @@ class WorkerThread(threading.Thread):
             self.db.update_task_end(task_id)
 
             self.status_callback(
-                task_id,
-                "SUCCESS" if exit_code == 0 else {"error": f"Task failed with exit code {exit_code}"}
+                task_id, exit_code=exit_code, report_path=str(output_file.resolve())
             )
         finally:
             self.running_tasks.remove(task_id)
